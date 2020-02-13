@@ -1,5 +1,5 @@
 # Ghost Variables
-Understanding complex predictive models with Ghost Variables
+## Understanding complex predictive models with Ghost Variables
 
 Joint paper with Daniel Peña (Universidad Carlos III de Madrid)
 
