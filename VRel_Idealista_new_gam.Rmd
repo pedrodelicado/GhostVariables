@@ -1,0 +1,168 @@
+---
+title: "Variable relevance measures (GAM model)"
+subtitle: "House renting prices from Idealista.com (new)"
+author: "Pedro Delicado, Daniel Peña"
+date: "27th January 2020"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Data from Idealista.com 
+
+
+The data come from [idealista-data] (https://github.com/seralexger/idealista-data)
+
+Author: Alejandro German (Alex seralexger)
+
+(Douwnloaded March 2nd, 2018)
+
+The R-markdown file `rent_housing_data.Rmd" has been used to read the data and to save some of them into `"rhBM_Price.Rdata"`.
+
+```{r}
+load(file="rhBM_Price.Rdata") 
+# rhBM.price, rhBM.priceByArea,
+names(rhBM.price)
+log.size <- TRUE
+if (log.size){
+  rhBM.price$size <- log(rhBM.price$size)
+  names(rhBM.price)[11]<-"log.size"
+} 
+```
+
+```{r}
+names(rhBM.priceByArea)
+```
+
+We define training and test set, fit these models, and apply variable relevance measures.
+
+### Training and test sets
+
+```{r}
+n <- dim(rhBM.price)[1]
+pr.tr <- .7
+pr.te <- 1 - pr.tr
+n.tr <- round(n*pr.tr)
+set.seed(123456)
+Itr <- sample(1:n,n.tr)
+Ite <- setdiff(1:n,Itr)
+n.te <- n.tr 
+```
+
+### Additive model for log(price)
+
+```{r}
+library(mgcv)
+
+if (log.size){
+  ad.mod.form <- "log(price) ~ Barcelona + 
+s(categ.distr,k=3) + 
+type.chalet + type.duplex + type.penthouse + type.studio + 
+s(floor) + hasLift + 
+s(floorLift,k=6) + 
+s(log.size) + exterior + 
+s(rooms) + s(bathrooms,k=6) + 
+hasParkingSpace + ParkingInPrice + 
+s(log_activation)"
+}else{
+  ad.mod.form <- "log(price) ~ Barcelona + 
+s(categ.distr,k=3) + 
+type.chalet + type.duplex + type.penthouse + type.studio + 
+s(floor) + hasLift + 
+s(floorLift,k=6) + 
+s(size) + exterior + 
+s(rooms) + s(bathrooms,k=6) + 
+hasParkingSpace + ParkingInPrice + 
+s(log_activation)"
+}
+
+am.logprice <- gam(as.formula(ad.mod.form), data=rhBM.price[Itr,])
+1-(mean(am.logprice$residuals^2)/var(log(rhBM.price$price)))
+#[1] 0.7803967
+(sum.am.logprice <- summary(am.logprice))
+``` 
+
+```{r}
+plot(log(rhBM.price$price[Itr]),am.logprice$fitted.values,
+     main=paste("Corr^2=",round(cor(log(rhBM.price$price[Itr]),am.logprice$fitted.values)^2,2)))
+```
+
+```{r, fig.height=10, fig.width=10}
+plot(am.logprice, residuals = TRUE, pages=1)
+```
+
+
+```{r}
+# Predicting in the test sample
+y.hat.te <- as.numeric( predict(am.logprice, newdata = rhBM.price[Ite,]) )
+
+plot(log(rhBM.price$price[Ite]),y.hat.te,
+     main=paste("Corr^2=",round(cor(log(rhBM.price$price[Ite]),y.hat.te)^2,2)))
+
+```
+
+### Variable relevance measures
+
+```{r}
+library(mgcv)
+library(ggplot2)
+library(grid)
+library(maptools)# For pointLabel
+
+source("R_scripts/relev.ghost.var.R")
+source("R_scripts/relev.rand.perm.R")
+```
+
+## Variable relevance matrix by ghost variables
+
+```{r, fig.height=14, fig.width=14}
+relev.ghost.out <- relev.ghost.var(model=am.logprice, 
+                             newdata = rhBM.price[Ite,],
+                             func.model.ghost.var= lm)
+```
+
+
+```{r final.graf.Gh, fig.height=14, fig.width=14}
+# Plotting only eigenvectors with more than 1% of total relevance
+plot.relev.ghost.var(relev.ghost.out, n1=n.tr, resid.var=am.logprice$sig2,
+                                 vars=1:7, sum.lm.tr=NULL,
+                                 alpha=.01, ncols.plot=4)
+```
+
+```{r final.graf.Gh.pdf, eval=FALSE}
+pdf(file="newVarRlevIdealista_gam_Gh.pdf", height=16, width=12)
+# Plotting only eigenvectors with more than 1% of total relevance
+plot.relev.ghost.var(relev.ghost.out, n1=n.tr, resid.var=am.logprice$sig2,
+                                 vars=1:7, sum.lm.tr=NULL,
+                                 alpha=.01, ncols.plot=3)
+dev.off()
+```
+
+## Variable relevance matrix by random permutation
+
+```{r}
+relev.rand.out <- relev.rand.perm(model=am.logprice, 
+                              newdata = rhBM.price[Ite,])
+```
+
+```{r, fig.height=14, fig.width=14}
+# Plotting only eigenvectors with more than 1% of total relevance
+plot.relev.rand.perm(relev.rand.out, relev.ghost=relev.ghost.out$relev.ghost,
+                                 vars=1:7, sum.lm.tr=NULL,
+                                 alpha=.01, ncols.plot=4)
+```
+
+```{r final.graf.RP.pdf, eval=FALSE}
+pdf(file="newVarRlevIdealista_gam_RP.pdf", height=16, width=12)
+# Plotting only eigenvectors with more than 1% of total relevance
+plot.relev.rand.perm(relev.rand.out, relev.ghost=relev.ghost.out$relev.ghost,
+                                 vars=1:7, sum.lm.tr=NULL,
+                                 alpha=.01, ncols.plot=3)
+dev.off()
+```
