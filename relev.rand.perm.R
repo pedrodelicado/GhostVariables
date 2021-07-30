@@ -2,18 +2,27 @@
 ### using the random permutation strategy
 
 relev.rand.perm <- function(model,newdata=model$call$data,
-                           nperm=1, ...){
+                           nperm=1, 
+                           permut.gam.vars =NULL, ...){
   #func.model <- eval(parse(text=class(model)[1])) # What kind of model has been fitted 
   #data.tr <- model$call$data[model$call$subset,] # data used for training the model
   #n <- dim(data.tr)[1]
   attr.model <- attributes(model$terms) #getting the varaible names in the model
   term.labels <- attr.model$term.labels #getting the varaible names in the model
+  # re-ordering variables in gam models to recover the order desired by the user 
+  if (!is.null(permut.gam.vars)) term.labels <- term.labels[permut.gam.vars]
+  
   p <- length(term.labels)
 
   n2 <- dim(newdata)[1] # newdata is the test sample
+  # Response variable in the test sample
+  name.y <- attr.model$variables[[2]]
+  y.ts <- newdata[[ name.y ]]
   # Predicting in the test sample
   y.hat.ts <- as.numeric( predict(model,newdata = newdata) )
   
+  MSPE.ts <- sum((y.ts-y.hat.ts)^2)/n2
+
   A <- matrix(0,nrow=n2, ncol=p)
   colnames(A) <- term.labels
   diag.cov.X <- numeric(p)
@@ -29,13 +38,15 @@ relev.rand.perm <- function(model,newdata=model$call$data,
     }
   }
   A <- A/nperm
-  V=(1/n2)*t(A)%*%A
+  # V=(1/n2)*t(A)%*%A
+  V=(1/n2)*t(A)%*%A / MSPE.ts
   relev.rp <- diag(V)
   eig.V <- eigen(V)
   return(list(A=A, V=V, 
               relev.rp=relev.rp, 
               eig.V=eig.V,
-              y.hat.test=y.hat.ts, 
+              y.hat.test=y.hat.ts,
+              MSPE.test=MSPE.ts,
               diag.cov.X=diag.cov.X)
          )
 }
@@ -121,7 +132,7 @@ plot.relev.rand.perm <- function(relev.rand.out,
   
   
   eig.V.df <- as.data.frame(eig.V$vectors)
-  eig.V.df$var.names <- colnames(A)
+  names(eig.V.df) <- colnames(A)
   
   op <-par(mfrow=c(nrows.plot,ncols.plot))
   plot(0,0,type="n",axes=FALSE,xlab="",ylab="")
@@ -163,7 +174,7 @@ plot.relev.rand.perm <- function(relev.rand.out,
     print(
       ggplot(eig.V.df) +
 #       geom_bar(aes(x=var.names, y=eig.V.df[,j]),
-        geom_bar(aes(x=reorder(eig.V.df$var.names,X=length(eig.V.df$var.names):1), 
+        geom_bar(aes(x=reorder(names(eig.V.df),X=length(names(eig.V.df)):1), 
                      y=eig.V.df[,j]),
                  stat="identity") +
         geom_hline(aes(yintercept=0),color="red",linetype=2,size=1) +

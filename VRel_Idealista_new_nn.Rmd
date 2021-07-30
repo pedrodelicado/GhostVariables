@@ -1,7 +1,7 @@
 ---
 title: "Variable relevance measures (Neural Network)"
 subtitle: "House renting prices from Idealista.com (new)"
-author: "Pedro Delicado, Daniel Peña"
+author: "Pedro Delicado, Daniel Pe?a"
 date: "14th July 2019"
 output:
   html_document:
@@ -29,6 +29,11 @@ The R-markdown file `rent_housing_data.Rmd" has been used to read the data and t
 load(file="rhBM_Price.Rdata") 
 # rhBM.price, rhBM.priceByArea,
 names(rhBM.price)
+log.price <- TRUE
+if (log.price){
+  rhBM.price$price <- log(rhBM.price$price)
+  names(rhBM.price)[1]<-"log.price"
+} 
 log.size <- TRUE
 if (log.size){
   rhBM.price$size <- log(rhBM.price$size)
@@ -59,7 +64,7 @@ Ite <- setdiff(1:n,Itr)
 n.te <- n.tr 
 ```
 
-### Neural network log(price)
+### Neural network log.price
 
 ```{r, results='hide'}
 require(nnet)
@@ -74,7 +79,7 @@ scaled.rhBM.price.te$price <- rhBM.price$price[Ite]
 ```{r, results='hide'}
 # #set.seed(123)
 # set.seed(1234)
-# nnet.logprice <- nnet(log(price)~., data=scaled.rhBM.price.tr, 
+# nnet.logprice <- nnet(log.price~., data=scaled.rhBM.price.tr, 
 #                size=10, linout=TRUE, maxit=100)
 # 
 # 1-(mean(nnet.logprice$residuals^2)/var(log(scaled.rhBM.price.tr$price)))
@@ -99,7 +104,7 @@ ctrl <- trainControl(
 nnetGrid = expand.grid(size = c(10,15,20), decay = c(0,.1,.3,.5))
 set.seed(123)
 nnetFit <- train(
-  log(price)~., 
+  log.price~., 
   data=scaled.rhBM.price.tr,
   method = "nnet",
   tuneGrid = nnetGrid,
@@ -123,19 +128,20 @@ nnet.logprice <- nnetFit$finalModel
 }else{
   # we already know that the optimal parameters are size=10, decay=0.5
   set.seed(123)
-  nnet.logprice <- nnet(log(price)~., data=scaled.rhBM.price.tr, 
+  nnet.logprice <- nnet(log.price~., data=scaled.rhBM.price.tr, 
                 size=10, decay=0.5, linout=TRUE, maxit=100)
 }
 ```
 
 ```{r}
-1-(mean(nnet.logprice$residuals^2)/var(log(scaled.rhBM.price.tr$price)))
-# [1] 0.7912618
+1-(mean(nnet.logprice$residuals^2)/var(scaled.rhBM.price.tr$log.price))
+# [1] 0.8009131
 ``` 
 
 ```{r}
-plot(log(rhBM.price$price[Itr]),nnet.logprice$fitted.values,
-     main=paste("Corr^2=",round(cor(log(rhBM.price$price[Itr]),nnet.logprice$fitted.values)^2,2)))
+plot(rhBM.price$log.price[Itr],nnet.logprice$fitted.values,
+     main=paste("Corr^2=",round(cor(rhBM.price$log.price[Itr],
+                                nnet.logprice$fitted.values)^2,2)))
 ```
 
 
@@ -143,8 +149,8 @@ plot(log(rhBM.price$price[Itr]),nnet.logprice$fitted.values,
 # Predicting in the test sample
 y.hat.te <- as.numeric( predict(nnet.logprice, newdata = scaled.rhBM.price.te) )
 
-plot(log(rhBM.price$price[Ite]),y.hat.te,
-     main=paste("Corr^2=",round(cor(log(rhBM.price$price[Ite]),y.hat.te)^2,2)))
+plot(rhBM.price$log.price[Ite],y.hat.te,
+     main=paste("Corr^2=",round(cor(rhBM.price$log.price[Ite],y.hat.te)^2,2)))
 
 ```
 
@@ -156,8 +162,8 @@ library(ggplot2)
 library(grid)
 library(maptools)# For pointLabel
 
-source("R_scripts/relev.ghost.var.R")
-source("R_scripts/relev.rand.perm.R")
+source("../../R_scripts/relev.ghost.var.R")
+source("../../R_scripts/relev.rand.perm.R")
 ```
 
 ## Variable relevance matrix by ghost variables
@@ -171,16 +177,18 @@ relev.ghost.out <- relev.ghost.var(model=nnet.logprice,
 
 ```{r, fig.height=14, fig.width=14}
 # Plotting only eigenvectors with more than 1% of total relevance
-plot.relev.ghost.var(relev.ghost.out, n1=n.tr, resid.var=mean(nnet.logprice$residuals^2),
-                                 vars=1:10, sum.lm.tr=NULL,
-                                 alpha=.01, ncols.plot=4)
+plot.relev.ghost.var(relev.ghost.out, n1=n.tr,
+                     # resid.var=mean(nnet.logprice$residuals^2),
+                     vars=1:10, sum.lm.tr=NULL,
+                     alpha=.01, ncols.plot=4)
 ```
 
 ```{r final.graf.Gh.pdf, eval=FALSE}
 pdf(file="newVarRlevIdealista_nn_Gh_3_3.pdf", height=16, width=12)
-plot.relev.ghost.var(relev.ghost.out, n1=n.tr, resid.var=mean(nnet.logprice$residuals^2),
-                                 vars=1:9, sum.lm.tr=NULL,
-                                 alpha=.01, ncols.plot=3)
+plot.relev.ghost.var(relev.ghost.out, n1=n.tr, 
+                     # resid.var=mean(nnet.logprice$residuals^2),
+                     vars=1:9, sum.lm.tr=NULL,
+                     alpha=.01, ncols.plot=3)
 dev.off()
 ```
 

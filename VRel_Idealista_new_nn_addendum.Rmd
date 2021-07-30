@@ -1,0 +1,643 @@
+---
+title: "Variable relevance measures (Neural Network)"
+subtitle: "House renting prices from Idealista.com (addendum after having sent the paper to publish)"
+author: "Pedro Delicado, Daniel Peña"
+date: "27th January 2020"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+printing <- FALSE
+```
+
+### Data from Idealista.com 
+
+
+The data come from [idealista-data] (https://github.com/seralexger/idealista-data)
+
+Author: Alejandro German (Alex seralexger)
+
+(Douwnloaded March 2nd, 2018)
+
+The R-markdown file `rent_housing_data.Rmd" has been used to read the data and to save some of them into `"rhBM_Price.Rdata"`.
+
+```{r}
+load(file="rhBM_Price.Rdata") 
+# rhBM.price, rhBM.priceByArea,
+names(rhBM.price)
+log.price <- TRUE
+if (log.price){
+  rhBM.price$price <- log(rhBM.price$price)
+  names(rhBM.price)[1]<-"log.price"
+} 
+log.size <- TRUE
+if (log.size){
+  rhBM.price$size <- log(rhBM.price$size)
+  names(rhBM.price)[11]<-"log.size"
+} 
+```
+
+```{r}
+names(rhBM.priceByArea)
+if (log.size){
+  rhBM.priceByArea$size <- log(rhBM.priceByArea$size)
+  names(rhBM.priceByArea)[11]<-"log.size"
+} 
+```
+
+We define training and test set, fit these models, and apply variable relevance measures.
+
+### Training and test sets
+
+```{r}
+n <- dim(rhBM.price)[1]
+pr.tr <- .7
+pr.te <- 1 - pr.tr
+n.tr <- round(n*pr.tr)
+set.seed(123456)
+Itr <- sample(1:n,n.tr)
+Ite <- setdiff(1:n,Itr)
+n.te <- n.tr 
+```
+
+### Neural network log(price)
+
+```{r, results='hide'}
+require(nnet)
+
+# centering and rescaling the explanatory variables before fitting the Neural Network
+scaled.rhBM.price.tr <- as.data.frame(scale(as.matrix(rhBM.price[Itr,])))
+scaled.rhBM.price.tr$price <- rhBM.price$price[Itr]
+scaled.rhBM.price.te <- as.data.frame(scale(as.matrix(rhBM.price[Ite,])))
+scaled.rhBM.price.te$price <- rhBM.price$price[Ite]
+``` 
+
+```{r, results='hide'}
+# #set.seed(123)
+# set.seed(1234)
+# nnet.logprice <- nnet(log(price)~., data=scaled.rhBM.price.tr, 
+#                size=10, linout=TRUE, maxit=100)
+# 
+# 1-(mean(nnet.logprice$residuals^2)/var(log(scaled.rhBM.price.tr$price)))
+# # [1] 0.7779355 # with set.seed(1234),  size=10, linout=TRUE, maxit=100
+# # [1] 0.7800399 # with set.seed(1234),  size=20, linout=TRUE, maxit=100
+# # [1] 0.7930953 # with set.seed(1234),  size=20, linout=TRUE, maxit=200
+# # [1] 0.7629634 # with set.seed(123),   size=10, linout=TRUE, maxit=100
+# # [1] 0.7754375 # with set.seed(123),   size=20, linout=TRUE, maxit=100
+# # [1] 0.7921368 # with set.seed(123),   size=20, linout=TRUE, maxit=200
+
+first.time <- FALSE
+
+if (first.time){
+# tuning parameters "size" and "decay" using caret
+require(caret)
+ctrl <- trainControl(
+  # method = "repeatedcv", # k-fold CV, k=num, repeated repeats times
+  # repeats = 3, # number of repetitions of the k-fold CV
+  method = "cv", # k-fold CV, k=num
+  num=10 # default
+)
+nnetGrid = expand.grid(size = c(10,15,20), decay = c(0,.1,.3,.5))
+set.seed(123)
+nnetFit <- train(
+  log.price~., 
+  data=scaled.rhBM.price.tr,
+  method = "nnet",
+  tuneGrid = nnetGrid,
+  trControl = ctrl,
+  metric = "RMSE",
+  linout=TRUE
+)
+nnetFit
+nnet.logprice <- nnetFit$finalModel
+# > nnet.logprice
+#
+# a 16-10-1 network with 181 weights
+# inputs: Barcelona categ.distr type.chalet type.duplex type.penthouse type.studio floor 
+# hasLift floorLift log.size exterior rooms bathrooms hasParkingSpace ParkingInPrice
+# log_activation 
+#
+# output(s): log.price 
+#
+# options were - linear output units  decay=0.5
+#
+}else{
+  # we already know that the optimal parameters are size=10, decay=0.5
+  set.seed(123)
+  nnet.logprice <- nnet(log.price~., data=scaled.rhBM.price.tr, 
+                size=10, decay=0.5, linout=TRUE, maxit=100)
+}
+```
+
+```{r}
+1-(mean(nnet.logprice$residuals^2)/var(scaled.rhBM.price.tr$log.price))
+# [1] 0.8009131 # July, 2021 laptop
+# [1] 0.7912618 # July, 2019, and January 2020!!!
+# [1] 0.8002104 # September 17, 2019, 
+``` 
+
+```{r}
+cor(rhBM.price$log.price[Itr],nnet.logprice$fitted.values)^2
+#           [,1]
+# [1,] 0.8002232 # September 17, 2019
+# [1,] 0.7913048 # January 2020
+# [1,] 0.8009471 # July, 2021 laptop
+plot(rhBM.price$log.price[Itr],nnet.logprice$fitted.values,
+     main=paste("Corr^2=",round(cor(rhBM.price$log.price[Itr],nnet.logprice$fitted.values)^2,2)))
+```
+
+
+```{r}
+# Predicting in the test sample
+y.hat.te.nn <- y.hat.te <- as.numeric( predict(nnet.logprice, newdata = scaled.rhBM.price.te) )
+1-mean((scaled.rhBM.price.te$log.price-y.hat.te)^2)/var(scaled.rhBM.price.te$log.price)
+# [1] 0.7920497 # January 2020
+# [1] 0.7885274 # July 2021, laptop
+cor(rhBM.price$log.price[Ite],y.hat.te)^2
+# [1] 0.7892885 # September 17, 2019
+# [1] 0.7929101 # January 2020
+# [1] 0.7885802 # July 2021, laptop
+plot(rhBM.price$log.price[Ite],y.hat.te,
+     main=paste("Corr^2=",round(cor(rhBM.price$log.price[Ite],y.hat.te)^2,2)))
+```
+
+### Variable relevance measures
+
+```{r}
+library(mgcv)
+library(ggplot2)
+library(grid)
+library(maptools)# For pointLabel
+
+source("../../R_scripts/relev.ghost.var.R")
+source("../../R_scripts/relev.rand.perm.R")
+```
+
+## Variable relevance matrix by ghost variables
+
+```{r, fig.height=14, fig.width=14}
+relev.ghost.out <- relev.ghost.var(model=nnet.logprice, 
+                             newdata = scaled.rhBM.price.te,
+                             func.model.ghost.var= lm)
+```
+
+
+```{r, fig.height=14, fig.width=14}
+# Plotting only eigenvectors with more than 1% of total relevance
+plot.relev.ghost.var(relev.ghost.out, n1=n.tr,
+                     # resid.var=mean(nnet.logprice$residuals^2),
+                                 vars=1:10, sum.lm.tr=NULL,
+                                 alpha=.01, ncols.plot=4)
+```
+
+```{r final.graf.Gh.pdf, eval=FALSE}
+if (printing) pdf(file="newVarRlevIdealista_nn_Gh.pdf", height=20, width=12)
+plot.relev.ghost.var(relev.ghost.out, n1=n.tr, 
+                     # resid.var=mean(nnet.logprice$residuals^2),
+                                 vars=1:10, sum.lm.tr=NULL,
+                                 alpha=.01, ncols.plot=3)
+if (printing) dev.off()
+```
+
+```{r final.graf.Gh.pdf.slides_1, eval=FALSE}
+if (printing) pdf(file="newVarRlevIdealista_nn_Gh_3_3.pdf", height=16, width=12)
+plot.relev.ghost.var(relev.ghost.out, n1=n.tr, resid.var=mean(nnet.logprice$residuals^2),
+                                 vars=1:9, sum.lm.tr=NULL,
+                                 alpha=.01, ncols.plot=3)
+if (printing) dev.off()
+```
+
+```{r final.graf.Gh.pdf.slides_2, eval=FALSE}
+if (printing) pdf(file="newVarRlevIdealista_nn_Gh_2_5.pdf", height=12, width=20)
+plot.relev.ghost.var(relev.ghost.out, n1=n.tr, resid.var=mean(nnet.logprice$residuals^2),
+                                 vars=1:10, sum.lm.tr=NULL,
+                                 alpha=.01, ncols.plot=5)
+if (printing) dev.off()
+```
+
+```{r final.graf.Gh.pdf.slides_3, eval=FALSE}
+if (printing) pdf(file="newVarRlevIdealista_nn_Gh_2_4.pdf", height=12, width=16)
+plot.relev.ghost.var(relev.ghost.out, n1=n.tr, resid.var=mean(nnet.logprice$residuals^2),
+                                 vars=1:8, sum.lm.tr=NULL,
+                                 alpha=.01, ncols.plot=4)
+if (printing) dev.off()
+```
+## Variable relevance matrix by random permutation
+
+```{r}
+relev.rand.out <- relev.rand.perm(model=nnet.logprice, 
+                              newdata = rhBM.price[Ite,])
+```
+
+
+```{r, fig.height=14, fig.width=14}
+# Plotting only eigenvectors with more than 1% of total relevance
+plot.relev.rand.perm(relev.rand.out, relev.ghost=relev.ghost.out$relev.ghost,
+                                 vars=1:16, sum.lm.tr=NULL,
+                                 alpha=.01, ncols.plot=4)
+```
+
+
+```{r final.graf.RP.pdf, eval=FALSE}
+if (printing) pdf(file="newVarRlevIdealista_nn_RP.pdf", height=20, width=12)
+# Plotting only eigenvectors with more than 1% of total relevance
+plot.relev.rand.perm(relev.rand.out, relev.ghost=relev.ghost.out$relev.ghost,
+                                 vars=1:12, sum.lm.tr=NULL,
+                                 alpha=.01, ncols.plot=3)
+if (printing) dev.off()
+```
+
+```{r final.graf.RP.pdf.slides_1, eval=FALSE}
+if (printing) pdf(file="newVarRlevIdealista_nn_RP_3_3.pdf", height=16, width=12)
+# Plotting only eigenvectors with more than 1% of total relevance
+plot.relev.rand.perm(relev.rand.out, relev.ghost=relev.ghost.out$relev.ghost,
+                                 vars=1:9, sum.lm.tr=NULL,
+                                 alpha=.01, ncols.plot=3)
+if (printing) dev.off()
+```
+
+```{r final.graf.RP.pdf.slides_2, eval=FALSE}
+if (printing) pdf(file="newVarRlevIdealista_nn_RP_2_5.pdf", height=12, width=20)
+# Plotting only eigenvectors with more than 1% of total relevance
+plot.relev.rand.perm(relev.rand.out, relev.ghost=relev.ghost.out$relev.ghost,
+                                 vars=1:10, sum.lm.tr=NULL,
+                                 alpha=.01, ncols.plot=5)
+if (printing) dev.off()
+```
+
+```{r final.graf.RP.pdf.slides_3, eval=FALSE}
+if (printing) pdf(file="newVarRlevIdealista_nn_RP_2_4.pdf", height=12, width=16)
+# Plotting only eigenvectors with more than 1% of total relevance
+plot.relev.rand.perm(relev.rand.out, relev.ghost=relev.ghost.out$relev.ghost,
+                                 vars=1:8, sum.lm.tr=NULL,
+                                 alpha=.01, ncols.plot=4)
+if (printing) dev.off()
+```
+
+***Addendum after having sent the paper to publish***
+<!--- 2019
+When computing relevances by Ghost variables, the most relevant variable is `log.size`, while by random permutations those marked as most relevant are `floor` and  `bathrooms`.
+
+We will remove those variables (one at a time) from the set of explanatory variables and then train again the neural network. We will compare the reduction in $R^2$ corresponding to each removed variable. The most important variable is that with a larger reduction. Will it be that indicated by ghost variables, or those indicated by random permutations?
+-->
+
+<!-- 2020 
+When computing relevances by Ghost variables, the most relevant variable is `log.size`, while by random permutations those marked as most relevant are `type.penthouse`, `floor` and  `bathrooms`.
+
+In order to compute the relevance by omission of those variables, we remove them (one at a time) from the set of explanatory variables and then train again the neural network. 
+The most important variable is that with a larger relevance by omission. 
+Will it be that indicated by ghost variables, or those indicated by random permutations?
+-->
+
+<!-- 2021 -->
+When computing relevances by Ghost variables, the most relevant variable is `log.size`, while by random permutations those marked as most relevant are `rooms`, `floor` and  `categ.distr`.
+
+In order to compute the relevance by omission of those variables, we remove them (one at a time) from the set of explanatory variables and then train again the neural network. 
+The most important variable is that with a larger relevance by omission. 
+Will it be that indicated by ghost variables, or those indicated by random permutations?
+
+
+```{r}
+names(scaled.rhBM.price.tr)
+# [1] "price"           "Barcelona"       "categ.distr"    
+# [4] "type.chalet"     "type.duplex"     "type.penthouse" 
+# [7] "type.studio"     "floor"           "hasLift"        
+#[10] "floorLift"       "log.size"        "exterior"       
+#[13] "rooms"           "bathrooms"       "hasParkingSpace"
+#[16] "ParkingInPrice"  "log_activation" 
+
+relev.by.omission <- numeric(5) 
+list.omission <- list(11,13,8,3,c(13,8,3))
+```
+
+**Removing `log.size`** 
+
+```{r, results='hide'}
+first.time.11 <- TRUE
+
+if (first.time.11){
+# tuning parameters "size" and "decay" using caret
+require(caret)
+ctrl <- trainControl(
+  # method = "repeatedcv", # k-fold CV, k=num, repeated repeats times
+  # repeats = 3, # number of repetitions of the k-fold CV
+  method = "cv", # k-fold CV, k=num
+  num=10 # default
+)
+nnetGrid = expand.grid(size = c(10,15,20), decay = c(0,.1,.3,.5))
+set.seed(123)
+nnetFit.11 <- train(
+  log.price~., 
+  data=scaled.rhBM.price.tr[,-11],
+  method = "nnet",
+  tuneGrid = nnetGrid,
+  trControl = ctrl,
+  metric = "RMSE",
+  linout=TRUE
+)
+nnetFit.11
+nnet.logprice.11 <- nnetFit.11$finalModel
+# > nnet.logprice.11
+#
+# a 15-20-1 network with 171 weights
+# inputs: Barcelona categ.distr type.chalet type.duplex type.penthouse type.studio floor hasLift floorLift exterior rooms bathrooms hasParkingSpace ParkingInPrice log_activation 
+# output(s): .outcome 
+# options were - linear output units  decay=0.5
+#
+}else{
+  # we already know that the optimal parameters are size=20, decay=0.5
+  set.seed(123)
+  nnet.logprice.11 <- nnet(log.price~.,
+                        data=scaled.rhBM.price.tr[,-11], 
+                size=20, decay=0.5, linout=TRUE, maxit=100)
+}
+
+1-(mean(nnet.logprice.11$residuals^2)/var(scaled.rhBM.price.tr$log.price))
+# [1] 0.7188321
+# [1] 0.7095302 # Enero 2020
+# [1] 0.7247141 # July 2021 laptop
+
+cor(rhBM.price$log.price[Itr],nnet.logprice.11$fitted.values)^2
+#           [,1]
+# [1,] 0.7188247
+#           [,1]
+# [1,] 0.7095598 # Enero 2020
+#          [,1]
+# [1,] 0.7246971 # July 2021 laptop
+
+
+# Predicting in the test sample
+y.hat.te.11 <- as.numeric( predict(nnet.logprice.11, newdata = scaled.rhBM.price.te[,-11]) )
+
+1-mean((scaled.rhBM.price.te$log.price-y.hat.te.11)^2)/var(scaled.rhBM.price.te$log.price)
+# [1] 0.7060598 # Enero 2020
+# [1] 0.6999083 # July 2021 laptop
+
+cor(rhBM.price$log.price[Ite],y.hat.te.11)^2
+# [1] 0.6960432
+# [1] 0.7060634 # Enero 2020
+# [1] 0.7002432 # July 2021 laptop
+
+relev.by.omission[1] <- mean((y.hat.te.11 - y.hat.te.nn)^2)
+```
+
+**Removing `rooms`** 
+
+```{r, results='hide'}
+first.time.13 <- TRUE
+
+if (first.time.13){
+# tuning parameters "size" and "decay" using caret
+require(caret)
+ctrl <- trainControl(
+  # method = "repeatedcv", # k-fold CV, k=num, repeated repeats times
+  # repeats = 3, # number of repetitions of the k-fold CV
+  method = "cv", # k-fold CV, k=num
+  num=10 # default
+)
+nnetGrid = expand.grid(size = c(10,15,20), decay = c(0,.1,.3,.5))
+set.seed(123)
+nnetFit.13 <- train(
+  log.price~., 
+  data=scaled.rhBM.price.tr[,-13],
+  method = "nnet",
+  tuneGrid = nnetGrid,
+  trControl = ctrl,
+  metric = "RMSE",
+  linout=TRUE
+)
+nnetFit.13
+nnet.logprice.13 <- nnetFit.13$finalModel
+# > nnet.logprice.13
+#
+# a 15-20-1 network with 341 weights
+# inputs: Barcelona categ.distr type.chalet type.duplex type.penthouse type.studio floor hasLift floorLift log.size exterior bathrooms hasParkingSpace ParkingInPrice log_activation 
+# output(s): .outcome 
+# options were - linear output units  decay=0.3
+#
+}else{
+  # we already know that the optimal parameters are size=10, decay=0.3
+  set.seed(123)
+  nnet.logprice.13 <- nnet(log.price~.,
+                        data=scaled.rhBM.price.tr[,-13], 
+                size=20, decay=0.3, linout=TRUE, maxit=100)
+}
+
+1-(mean(nnet.logprice.13$residuals^2)/var(scaled.rhBM.price.tr$log.price))
+# [1] 0.8007802
+
+cor(rhBM.price$log.price[Itr],nnet.logprice.13$fitted.values)^2
+#           [,1]
+# [1,] 0.8007731
+
+# Predicting in the test sample
+y.hat.te.13 <- as.numeric( predict(nnet.logprice.13, newdata = scaled.rhBM.price.te[,-13]) )
+
+1-mean((scaled.rhBM.price.te$log.price-y.hat.te.13)^2)/var(scaled.rhBM.price.te$log.price)
+# [1] 0.7878334
+
+cor(rhBM.price$log.price[Ite],y.hat.te.13)^2
+# [1] 0.78791
+
+relev.by.omission[2] <- mean((y.hat.te.13 - y.hat.te.nn)^2)
+```
+
+**Removing `floor`** 
+
+```{r, results='hide'}
+first.time.8 <- TRUE
+
+if (first.time.8){
+# tuning parameters "size" and "decay" using caret
+require(caret)
+ctrl <- trainControl(
+  # method = "repeatedcv", # k-fold CV, k=num, repeated repeats times
+  # repeats = 3, # number of repetitions of the k-fold CV
+  method = "cv", # k-fold CV, k=num
+  num=10 # default
+)
+nnetGrid = expand.grid(size = c(10,15,20), decay = c(0,.1,.3,.5))
+set.seed(123)
+nnetFit.8 <- train(
+  log.price~., 
+  data=scaled.rhBM.price.tr[,-8],
+  method = "nnet",
+  tuneGrid = nnetGrid,
+  trControl = ctrl,
+  metric = "RMSE",
+  linout=TRUE
+)
+nnetFit.8
+nnet.logprice.8 <- nnetFit.8$finalModel
+# > nnet.logprice.8
+#
+# a 15-20-1 network with 341 weights
+# inputs: Barcelona categ.distr type.chalet type.duplex type.penthouse type.studio hasLift floorLift log.size exterior rooms bathrooms hasParkingSpace ParkingInPrice log_activation 
+# output(s): .outcome 
+# options were - linear output units  decay=0.5
+#
+}else{
+  # we already know that the optimal parameters are size=10, decay=0.3
+  set.seed(123)
+  nnet.logprice.8 <- nnet(log.price~.,
+                        data=scaled.rhBM.price.tr[,-8], 
+                size=20, decay=0.5, linout=TRUE, maxit=100)
+}
+
+1-(mean(nnet.logprice.8$residuals^2)/var(scaled.rhBM.price.tr$log.price))
+# 1] 0.8012655
+
+cor(rhBM.price$log.price[Itr],nnet.logprice.8$fitted.values)^2
+#           [,1]
+# [1,] 0.8012655
+
+# Predicting in the test sample
+y.hat.te.8 <- as.numeric( predict(nnet.logprice.8, newdata = scaled.rhBM.price.te[,-8]) )
+
+1-mean((scaled.rhBM.price.te$log.price-y.hat.te.8)^2)/var(scaled.rhBM.price.te$log.price)
+# [1] 0.7856834
+
+cor(rhBM.price$log.price[Ite],y.hat.te.8)^2
+# [1] 0.7859383
+
+relev.by.omission[3] <- mean((y.hat.te.8 - y.hat.te.nn)^2)
+```
+
+
+**Removing `catyeg.distr`** 
+
+
+```{r, results='hide'}
+first.time.3 <- TRUE
+
+if (first.time.3){
+# tuning parameters "size" and "decay" using caret
+require(caret)
+ctrl <- trainControl(
+  # method = "repeatedcv", # k-fold CV, k=num, repeated repeats times
+  # repeats = 3, # number of repetitions of the k-fold CV
+  method = "cv", # k-fold CV, k=num
+  num=10 # default
+)
+nnetGrid = expand.grid(size = c(10,15,20), decay = c(0,.1,.3,.5))
+set.seed(123)
+nnetFit.3 <- train(
+  log.price~., 
+  data=scaled.rhBM.price.tr[,-3],
+  method = "nnet",
+  tuneGrid = nnetGrid,
+  trControl = ctrl,
+  metric = "RMSE",
+  linout=TRUE
+)
+nnetFit.3
+nnet.logprice.3 <- nnetFit.3$finalModel
+# > nnet.logprice.3
+#
+# a 15-20-1 network with 341 weights
+# inputs: Barcelona type.chalet type.duplex type.penthouse type.studio floor hasLift floorLift log.size exterior rooms bathrooms hasParkingSpace ParkingInPrice log_activation 
+# output(s): .outcome 
+# options were - linear output units  decay=0.5
+#
+}else{
+  # we already know that the optimal parameters are size=10, decay=0.3
+  set.seed(123)
+  nnet.logprice.3 <- nnet(log.price~.,
+                        data=scaled.rhBM.price.tr[,-3], 
+                size=20, decay=0.5, linout=TRUE, maxit=100)
+}
+
+1-(mean(nnet.logprice.3$residuals^2)/var(scaled.rhBM.price.tr$log.price))
+# [1] 0.7831749
+
+cor(rhBM.price$log.price[Itr],nnet.logprice.3$fitted.values)^2
+#           [,1]
+# [1,] 0.7831991
+
+# Predicting in the test sample
+y.hat.te.3 <- as.numeric( predict(nnet.logprice.3, newdata = scaled.rhBM.price.te[,-3]) )
+
+1-mean((scaled.rhBM.price.te$log.price-y.hat.te.3)^2)/var(scaled.rhBM.price.te$log.price)
+# [1] 0.7634722
+
+cor(rhBM.price$log.price[Ite],y.hat.te.3)^2
+# [1] 0.7635141
+
+relev.by.omission[4] <- mean((y.hat.te.3 - y.hat.te.nn)^2)
+```
+
+
+
+**Removing `penthouse`, `floor` and `bathrooms`** 
+
+
+```{r, results='hide'}
+first.time.13.8.3 <- TRUE
+
+if (first.time.13.8.3){
+# tuning parameters "size" and "decay" using caret
+require(caret)
+ctrl <- trainControl(
+  # method = "repeatedcv", # k-fold CV, k=num, repeated repeats times
+  # repeats = 3, # number of repetitions of the k-fold CV
+  method = "cv", # k-fold CV, k=num
+  num=10 # default
+)
+nnetGrid = expand.grid(size = c(10,15,20), decay = c(0,.1,.3,.5))
+set.seed(123)
+nnetFit.13.8.3 <- train(
+  log.price~., 
+  data=scaled.rhBM.price.tr[,-c(13,8,3)],
+  method = "nnet",
+  tuneGrid = nnetGrid,
+  trControl = ctrl,
+  metric = "RMSE",
+  linout=TRUE
+)
+nnetFit.13.8.3
+nnet.logprice.13.8.3 <- nnetFit.13.8.3$finalModel
+# > nnet.logprice.13.8.3
+#
+# a 13-20-1 network with 301 weights
+# inputs: Barcelona type.chalet type.duplex type.penthouse type.studio hasLift floorLift log.size exterior bathrooms hasParkingSpace ParkingInPrice log_activation 
+# output(s): .outcome 
+# options were - linear output units  decay=0.3
+#
+}else{
+  # we already know that the optimal parameters are size=10, decay=0.3
+  set.seed(123)
+  nnet.logprice.13.8.3 <- nnet(log.price~.,
+                        data=scaled.rhBM.price.tr[,-c(13,8,3)], 
+                size=20, decay=0.3, linout=TRUE, maxit=100)
+}
+
+1-(mean(nnet.logprice.13.8.3$residuals^2)/var(scaled.rhBM.price.tr$log.price))
+# [1] 0.7586767
+
+cor(rhBM.price$log.price[Itr],nnet.logprice.13.8.3$fitted.values)^2
+#         [,1]
+# [1,] 0.75868
+
+# Predicting in the test sample
+y.hat.te.13.8.3 <- as.numeric( predict(nnet.logprice.13.8.3, newdata = scaled.rhBM.price.te[,-c(13,8,3)]) )
+
+1-mean((scaled.rhBM.price.te$log.price-y.hat.te.13.8.3)^2)/var(scaled.rhBM.price.te$log.price)
+# [1] 0.7388711
+
+cor(rhBM.price$log.price[Ite],y.hat.te.13.8.3)^2
+# [1] 0.7391262
+
+relev.by.omission[5] <- mean((y.hat.te.13.8.3 - y.hat.te.nn)^2)
+```
+
+```{r}
+MSPE.tr <- mean(nnet.logprice$residuals^2)
+MSPE.te <- mean((scaled.rhBM.price.te$log.price-y.hat.te)^2)
+(relev.by.omission <- relev.by.omission/MSPE.te)
+# [1] 2.3351372 0.4199004 0.4806855 1.0032761 1.3221101
+```

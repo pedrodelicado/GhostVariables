@@ -1,8 +1,8 @@
 ---
 title: "Variable relevance measures (GAM model)"
 subtitle: "House renting prices from Idealista.com (new)"
-author: "Pedro Delicado, Daniel Peña"
-date: "27th January 2020"
+author: "Pedro Delicado, Daniel Pe?a"
+date: "14th July 2019"
 output:
   html_document:
     df_print: paged
@@ -29,6 +29,11 @@ The R-markdown file `rent_housing_data.Rmd" has been used to read the data and t
 load(file="rhBM_Price.Rdata") 
 # rhBM.price, rhBM.priceByArea,
 names(rhBM.price)
+log.price <- TRUE
+if (log.price){
+  rhBM.price$price <- log(rhBM.price$price)
+  names(rhBM.price)[1]<-"log.price"
+} 
 log.size <- TRUE
 if (log.size){
   rhBM.price$size <- log(rhBM.price$size)
@@ -61,7 +66,7 @@ n.te <- n.tr
 library(mgcv)
 
 if (log.size){
-  ad.mod.form <- "log(price) ~ Barcelona + 
+  ad.mod.form <- "log.price ~ Barcelona + 
 s(categ.distr,k=3) + 
 type.chalet + type.duplex + type.penthouse + type.studio + 
 s(floor) + hasLift + 
@@ -71,7 +76,7 @@ s(rooms) + s(bathrooms,k=6) +
 hasParkingSpace + ParkingInPrice + 
 s(log_activation)"
 }else{
-  ad.mod.form <- "log(price) ~ Barcelona + 
+  ad.mod.form <- "log.price ~ Barcelona + 
 s(categ.distr,k=3) + 
 type.chalet + type.duplex + type.penthouse + type.studio + 
 s(floor) + hasLift + 
@@ -83,14 +88,14 @@ s(log_activation)"
 }
 
 am.logprice <- gam(as.formula(ad.mod.form), data=rhBM.price[Itr,])
-1-(mean(am.logprice$residuals^2)/var(log(rhBM.price$price)))
+1-(mean(am.logprice$residuals^2)/var(rhBM.price$log.price))
 #[1] 0.7803967
 (sum.am.logprice <- summary(am.logprice))
 ``` 
 
 ```{r}
-plot(log(rhBM.price$price[Itr]),am.logprice$fitted.values,
-     main=paste("Corr^2=",round(cor(log(rhBM.price$price[Itr]),am.logprice$fitted.values)^2,2)))
+plot(rhBM.price$log.price[Itr],am.logprice$fitted.values,
+     main=paste("Corr^2=",round(cor(rhBM.price$log.price[Itr],am.logprice$fitted.values)^2,2)))
 ```
 
 ```{r, fig.height=10, fig.width=10}
@@ -102,8 +107,8 @@ plot(am.logprice, residuals = TRUE, pages=1)
 # Predicting in the test sample
 y.hat.te <- as.numeric( predict(am.logprice, newdata = rhBM.price[Ite,]) )
 
-plot(log(rhBM.price$price[Ite]),y.hat.te,
-     main=paste("Corr^2=",round(cor(log(rhBM.price$price[Ite]),y.hat.te)^2,2)))
+plot(rhBM.price$log.price[Ite],y.hat.te,
+     main=paste("Corr^2=",round(cor(rhBM.price$log.price[Ite],y.hat.te)^2,2)))
 
 ```
 
@@ -115,22 +120,24 @@ library(ggplot2)
 library(grid)
 library(maptools)# For pointLabel
 
-source("R_scripts/relev.ghost.var.R")
-source("R_scripts/relev.rand.perm.R")
+source("../../R_scripts/relev.ghost.var.R")
+source("../../R_scripts/relev.rand.perm.R")
 ```
 
 ## Variable relevance matrix by ghost variables
 
 ```{r, fig.height=14, fig.width=14}
+permut <- c(1,10,2:5,11,6,12,13,7,14,15,8,9,16)
 relev.ghost.out <- relev.ghost.var(model=am.logprice, 
                              newdata = rhBM.price[Ite,],
-                             func.model.ghost.var= lm)
+                             func.model.ghost.var= lm,
+                             permut.gam.vars= permut)
 ```
 
 
 ```{r final.graf.Gh, fig.height=14, fig.width=14}
 # Plotting only eigenvectors with more than 1% of total relevance
-plot.relev.ghost.var(relev.ghost.out, n1=n.tr, resid.var=am.logprice$sig2,
+plot.relev.ghost.var(relev.ghost.out, n1=n.tr, #resid.var=am.logprice$sig2,
                                  vars=1:7, sum.lm.tr=NULL,
                                  alpha=.01, ncols.plot=4)
 ```
@@ -138,7 +145,7 @@ plot.relev.ghost.var(relev.ghost.out, n1=n.tr, resid.var=am.logprice$sig2,
 ```{r final.graf.Gh.pdf, eval=FALSE}
 pdf(file="newVarRlevIdealista_gam_Gh.pdf", height=16, width=12)
 # Plotting only eigenvectors with more than 1% of total relevance
-plot.relev.ghost.var(relev.ghost.out, n1=n.tr, resid.var=am.logprice$sig2,
+plot.relev.ghost.var(relev.ghost.out, n1=n.tr, #resid.var=am.logprice$sig2,
                                  vars=1:7, sum.lm.tr=NULL,
                                  alpha=.01, ncols.plot=3)
 dev.off()
@@ -148,7 +155,8 @@ dev.off()
 
 ```{r}
 relev.rand.out <- relev.rand.perm(model=am.logprice, 
-                              newdata = rhBM.price[Ite,])
+                              newdata = rhBM.price[Ite,],
+                              permut.gam.vars = permut)
 ```
 
 ```{r, fig.height=14, fig.width=14}

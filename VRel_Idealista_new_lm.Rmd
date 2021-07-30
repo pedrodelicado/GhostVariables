@@ -1,8 +1,8 @@
 ---
 title: "Variable relevance measures (linera model)"
 subtitle: "House renting prices from Idealista.com (new)"
-author: "Pedro Delicado, Daniel Peña"
-date: "27th January 2020"
+author: "Pedro Delicado, Daniel Pe?a"
+date: "14th July 2019"
 output:
   html_document:
     df_print: paged
@@ -29,6 +29,11 @@ The R-markdown file `rent_housing_data.Rmd" has been used to read the data and t
 load(file="rhBM_Price.Rdata") 
 # rhBM.price, rhBM.priceByArea,
 names(rhBM.price)
+log.price <- TRUE
+if (log.price){
+  rhBM.price$price <- log(rhBM.price$price)
+  names(rhBM.price)[1]<-"log.price"
+} 
 log.size <- TRUE
 if (log.size){
   rhBM.price$size <- log(rhBM.price$size)
@@ -59,15 +64,17 @@ n.te <- n-n.tr
 
 ```{r}
 # lm.logprice
-lm.logprice <- lm(log(price)~., data=rhBM.price[Itr,])
-1-(mean(lm.logprice$residuals^2)/var(log(rhBM.price$price)))
-# [1] 0.6982418
+lm.logprice <- lm(log.price~., data=rhBM.price[Itr,])
+1-(mean(lm.logprice$residuals^2)/var(rhBM.price$log.price))
+# [1] 0.7590134
 (sum.lm.logprice <- summary(lm.logprice))
 
 ``` 
 ```{r}
-plot(log(rhBM.price$price[Itr]),lm.logprice$fitted.values,
-     main=paste("Corr^2=",round(cor(log(rhBM.price$price[Itr]),lm.logprice$fitted.values)^2,2)))
+cor(rhBM.price$log.price[Itr],lm.logprice$fitted.values)^2
+# [1] 0.7620808
+plot(rhBM.price$log.price[Itr],lm.logprice$fitted.values,
+     main=paste("Corr^2=",round(cor(rhBM.price$log.price[Itr],lm.logprice$fitted.values)^2,2)))
 
 plot(lm.logprice)
 ```
@@ -76,9 +83,10 @@ plot(lm.logprice)
 ```{r}
 # Predicting in the test sample
 y.hat.te <- as.numeric( predict(lm.logprice, newdata = rhBM.price[Ite,]) )
-
-plot(log(rhBM.price$price[Ite]),y.hat.te,
-     main=paste("Corr^2=",round(cor(log(rhBM.price$price[Ite]),y.hat.te)^2,2)))
+cor(rhBM.price$log.price[Ite],y.hat.te)^2
+# [1] 0.7665301
+plot(rhBM.price$log.price[Ite],y.hat.te,
+     main=paste("Corr^2=",round(cor(rhBM.price$log.price[Ite],y.hat.te)^2,2)))
 
 ```
 
@@ -90,34 +98,44 @@ library(ggplot2)
 library(grid)
 library(maptools)# For pointLabel
 
-source("R_scripts/relev.ghost.var.R")
-source("R_scripts/relev.rand.perm.R")
+source("../../R_scripts/relev.ghost.var.R")
+source("../../R_scripts/relev.rand.perm.R")
 ```
 
 ## Variable relevance matrix by ghost variables
 
 ```{r, fig.height=14, fig.width=14}
-relev.ghost.out <- relev.ghost.var(model=lm.logprice, newdata = rhBM.price[Ite,],
-                             func.model.ghost.var= lm)
+relev.ghost.out <- relev.ghost.var(model=lm.logprice, newdata = rhBM.price[Ite,],                            func.model.ghost.var= lm)
 ```
 
 
 ```{r final.graf.Gh, fig.height=14, fig.width=14}
 # Plotting only eigenvectors with more than 1% of total relevance
-plot.relev.ghost.var(relev.ghost.out, n1=n.tr, resid.var=sum.lm.logprice$sigma^2,
-                                 vars=1:7, sum.lm.tr=sum.lm.logprice,
-                                 alpha=.01, ncols.plot=4)
+plot.relev.ghost.var(relev.ghost.out, n1=n.tr,
+                     #resid.var=sum.lm.logprice$sigma^2,
+                     vars=1:7, sum.lm.tr=sum.lm.logprice,
+                     alpha=.01, ncols.plot=4)
 ```
 
 ```{r final.graf.Gh.pdf, eval=FALSE}
 pdf(file="newVarRlevIdealista_Gh.pdf", height=16, width=12)
 # Plotting only eigenvectors with more than 1% of total relevance
-plot.relev.ghost.var(relev.ghost.out, n1=n.tr, resid.var=sum.lm.logprice$sigma^2,
-                                 vars=1:7, sum.lm.tr=sum.lm.logprice,
-                                 alpha=.01, ncols.plot=3)
+plot.relev.ghost.var(relev.ghost.out, n1=n.tr,
+                     # resid.var=sum.lm.logprice$sigma^2,
+                     vars=1:7, sum.lm.tr=sum.lm.logprice,
+                     alpha=.01, ncols.plot=3)
 dev.off()
 ```
 
+```{r final.graf.Gh.pdf.slides, eval=FALSE}
+pdf(file="newVarRlevIdealista_Gh_2_4.pdf", height=12, width=16)
+# Plotting only eigenvectors with more than 1% of total relevance
+plot.relev.ghost.var(relev.ghost.out, n1=n.tr,
+                     # resid.var=sum.lm.logprice$sigma^2,
+                     vars=1:7, sum.lm.tr=sum.lm.logprice,
+                     alpha=.01, ncols.plot=4)
+dev.off()
+```
 ## Variable relevance matrix by random permutation
 
 ```{r}
@@ -127,9 +145,10 @@ relev.rand.out <- relev.rand.perm(model=lm.logprice,
 
 ```{r final.graf.rp, fig.height=14, fig.width=14}
 # Plotting only eigenvectors with more than 1% of total relevance
-plot.relev.rand.perm(relev.rand.out, relev.ghost=relev.ghost.out$relev.ghost,
-                                 vars=1:7, sum.lm.tr=sum.lm.logprice,
-                                 alpha=.01, ncols.plot=4)
+plot.relev.rand.perm(relev.rand.out,
+                     relev.ghost=relev.ghost.out$relev.ghost,
+                     vars=1:7, sum.lm.tr=sum.lm.logprice,
+                     alpha=.01, ncols.plot=4)
 ```
 
 
@@ -139,5 +158,13 @@ pdf(file="newVarRlevIdealista_RP.pdf", height=12, width=12)
 plot.relev.rand.perm(relev.rand.out, relev.ghost=relev.ghost.out$relev.ghost,
                                  vars=1:6, sum.lm.tr=sum.lm.logprice,
                                  alpha=.01, ncols.plot=3)
+dev.off()
+```
+```{r final.graf.RP.pdf.slides, eval=FALSE}
+pdf(file="newVarRlevIdealista_RP_2_4.pdf", height=12, width=16)
+# Plotting only eigenvectors with more than 1% of total relevance
+plot.relev.rand.perm(relev.rand.out, relev.ghost=relev.ghost.out$relev.ghost,
+                                 vars=1:6, sum.lm.tr=sum.lm.logprice,
+                                 alpha=.01, ncols.plot=4)
 dev.off()
 ```

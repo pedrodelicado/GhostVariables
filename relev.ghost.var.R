@@ -2,12 +2,16 @@
 ### using the Ghost Variables strategy
 
 relev.ghost.var <- function(model,newdata=model$call$data,
-                           func.model.ghost.var=gam, ...){
+                           func.model.ghost.var=gam, 
+                           permut.gam.vars =NULL, ...){
   #func.model <- eval(parse(text=class(model)[1])) # What kind of model has been fitted 
   #data.tr <- model$call$data[model$call$subset,] # data used for training the model
   #n <- dim(data.tr)[1]
   attr.model <- attributes(model$terms) #getting the varaible names in the model
   term.labels <- attr.model$term.labels #getting the varaible names in the model
+  # re-ordering variables in gam models to recover the order desired by the user 
+  if (!is.null(permut.gam.vars)) term.labels <- term.labels[permut.gam.vars]
+  
   if (formals(func.model.ghost.var)[[2]]==formals(gam)[[2]]){
     s.term.labels <- paste0("s(",term.labels,")")
   }else{
@@ -16,8 +20,13 @@ relev.ghost.var <- function(model,newdata=model$call$data,
   p <- length(term.labels)
 
   n2 <- dim(newdata)[1] # newdata is the test sample
+  # Response variable in the test sample
+  name.y <- attr.model$variables[[2]]
+  y.ts <- newdata[[ name.y ]]
   # Predicting in the test sample
   y.hat.ts <- as.numeric( predict(model,newdata = newdata) )
+  
+  MSPE.ts <- sum((y.ts-y.hat.ts)^2)/n2
   
   A <- matrix(0,nrow=n2, ncol=p)
   colnames(A) <- term.labels
@@ -32,17 +41,19 @@ relev.ghost.var <- function(model,newdata=model$call$data,
     A[,j] <- y.hat.ts - y.hat.ts.j
     GhostX[,j] <- xj.hat
   }
-  V=(1/n2)*t(A)%*%A
+  # V=(1/n2)*t(A)%*%A
+  V=(1/n2)*t(A)%*%A / MSPE.ts
   relev.ghost <- diag(V)
   eig.V <- eigen(V)
   return(list(A=A, V=V, GhostX=GhostX, 
               relev.ghost=relev.ghost, 
               eig.V=eig.V,
-              y.hat.test=y.hat.ts)
+              y.hat.test=y.hat.ts,
+              MSPE.test=MSPE.ts)
          )
 }
 
-plot.relev.ghost.var <- function(relev.ghost.out, n1, resid.var,
+plot.relev.ghost.var <- function(relev.ghost.out, n1,
                                  vars=NULL, sum.lm.tr=NULL,
                                  alpha=.01, ncols.plot=3){
   A <- relev.ghost.out$A
@@ -50,6 +61,7 @@ plot.relev.ghost.var <- function(relev.ghost.out, n1, resid.var,
   eig.V <- relev.ghost.out$eig.V
   GhostX <- relev.ghost.out$GhostX
   relev.ghost <- relev.ghost.out$relev.ghost
+  resid.var <- relev.ghost.out$MSPE.test
 
   p  <- dim(A)[2]
   
@@ -71,23 +83,38 @@ plot.relev.ghost.var <- function(relev.ghost.out, n1, resid.var,
   nrows.plot <- 1 + n.vars%/%ncols.plot + (n.vars%%ncols.plot>0)
   
   if (!is.null(sum.lm.tr)){
-    F.transformed <- resid.var*sum.lm.tr$coefficients[-1,3]^2/n1
+  #  F.transformed <- resid.var*sum.lm.tr$coefficients[-1,3]^2/n1
+    F.transformed <- sum.lm.tr$coefficients[-1,3]^2/n1
   }
-  F.critic.transformed <- resid.var*qf(1-alpha,1,n1-p-1)/n1
-
+  # F.critic.transformed <- resid.var*qf(1-alpha,1,n1-p-1)/n1
+  F.critic.transformed <- qf(1-alpha,1,n1-p-1)/n1
+  
   rel.Gh <- data.frame(relev.ghost=relev.ghost)
   rel.Gh$var.names <- colnames(A)
   
-  plot.rel.Gh <- ggplot(rel.Gh) +
-    geom_bar(aes(x=reorder(var.names,X=length(var.names):1), y=relev.ghost), 
-             stat="identity", fill="darkgray") +
-    ggtitle("Relev. by ghost variables") +
-    geom_hline(aes(yintercept = F.critic.transformed),color="blue",size=1.5,linetype=2)+
-    theme(axis.title=element_blank())+
-    theme_bw()+
-    ylab("Relevance")+
-    xlab("Variable name") +
-    coord_flip()
+  if (!is.null(sum.lm.tr)){
+    plot.rel.Gh <- ggplot(rel.Gh) +
+      geom_bar(aes(x=reorder(var.names,X=length(var.names):1), y=relev.ghost), 
+               stat="identity", fill="darkgray") +
+      ggtitle("Relev. by ghost variables") +
+      geom_hline(aes(yintercept = F.critic.transformed),color="blue",size=1.5,linetype=2)+
+      theme(axis.title=element_blank())+
+      theme_bw()+
+      ylab("Relevance")+
+      xlab("Variable name") +
+      coord_flip()
+  }else{
+    plot.rel.Gh <- ggplot(rel.Gh) +
+      geom_bar(aes(x=reorder(var.names,X=length(var.names):1), y=relev.ghost), 
+               stat="identity", fill="darkgray") +
+      ggtitle("Relev. by ghost variables") +
+      #geom_hline(aes(yintercept = F.critic.transformed),color="blue",size=1.5,linetype=2)+
+      theme(axis.title=element_blank())+
+      theme_bw()+
+      ylab("Relevance")+
+      xlab("Variable name") +
+      coord_flip()
+  }
     
   plot.rel.Gh.pctg <- ggplot(rel.Gh) +
     geom_bar(aes(x=reorder(var.names,X=length(var.names):1), 
@@ -115,7 +142,7 @@ plot.relev.ghost.var <- function(relev.ghost.out, n1, resid.var,
   
   
   eig.V.df <- as.data.frame(eig.V$vectors)
-  eig.V.df$var.names <- colnames(A)
+  names(eig.V.df) <- colnames(A)
   
   op <-par(mfrow=c(nrows.plot,ncols.plot))
   plot(0,0,type="n",axes=FALSE,xlab="",ylab="")
@@ -124,7 +151,8 @@ plot.relev.ghost.var <- function(relev.ghost.out, n1, resid.var,
     plot(F.transformed,relev.ghost,
          xlim=c(0,max(c(F.transformed,relev.ghost))),
          ylim=c(0,max(c(F.transformed,relev.ghost))),
-         xlab=expression(paste("F-statistics*",hat(sigma)^2/n[1])), 
+#         xlab=expression(paste("F-statistics*",hat(sigma)^2/n[1])), 
+         xlab=expression(paste("F-statistics/",n[1])), 
          ylab="Relev. by ghost variables")
     pointLabel(F.transformed,relev.ghost, colnames(A))
     abline(a=0,b=1,col=2)
@@ -150,7 +178,7 @@ plot.relev.ghost.var <- function(relev.ghost.out, n1, resid.var,
     print(
       ggplot(eig.V.df) +
 #       geom_bar(aes(x=var.names, y=eig.V.df[,j]),
-        geom_bar(aes(x=reorder(eig.V.df$var.names,X=length(eig.V.df$var.names):1), 
+        geom_bar(aes(x=reorder(names(eig.V.df),X=length(names(eig.V.df)):1), 
                      y=eig.V.df[,j]), stat="identity") +
         geom_hline(aes(yintercept=0),color="red",linetype=2,size=1) +
         ylim(min(eig.V.df[,j])-.5,max(eig.V.df[,j])+.5) +
